@@ -351,9 +351,18 @@ def save_samruk_tenders(tenders):
 
 def fetch_goszakup_web(keywords: list, limit: int = 60) -> list:
     """
-    Scrapes goszakup.gov.kz public search page without API token.
-    Searches by keywords, returns list of tender dicts.
+    Scrapes goszakup.gov.kz/ru/search/lots without API token.
+
+    Table columns (0-based):
+      0 = лот# + link to /announce/index/{id}
+      1 = наименование объявления (same link)
+      2 = описание лота (link to subpriceoffer)
+      3 = кол-во (quantity, e.g. "1")
+      4 = сумма, тг. (budget, e.g. "450 000.00")
+      5 = способ закупки
+      6 = статус
     """
+    import re as _re
     try:
         from bs4 import BeautifulSoup
     except ImportError:
@@ -362,7 +371,7 @@ def fetch_goszakup_web(keywords: list, limit: int = 60) -> list:
 
     results = []
     seen_ids: set = set()
-    headers = {
+    req_headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -381,73 +390,84 @@ def fetch_goszakup_web(keywords: list, limit: int = 60) -> list:
             resp = requests.get(
                 "https://goszakup.gov.kz/ru/search/lots",
                 params={"filter[name]": keyword, "count": "20"},
-                headers=headers,
+                headers=req_headers,
                 timeout=30,
             )
             if resp.status_code != 200:
                 print(f"    HTTP {resp.status_code}")
                 continue
 
-            from bs4 import BeautifulSoup
             soup = BeautifulSoup(resp.text, "html.parser")
 
-            for a_tag in soup.find_all("a", href=True):
-                href = a_tag["href"]
-                is_announce = "/announce/index/" in href
-                is_lot = "/lots/index/" in href
-                if not (is_announce or is_lot):
+            # Find the main results table (has class "dataTable")
+            main_table = soup.find("table", {"class": lambda c: c and "dataTable" in c})
+            if not main_table:
+                # fallback: second table on page
+                all_tables = soup.find_all("table")
+                main_table = all_tables[1] if len(all_tables) > 1 else None
+            if not main_table:
+                print(f"    ⚠️ таблица не найдена")
+                continue
+
+            rows = main_table.find_all("tr")[1:]  # skip header row
+            print(f"    Строк в таблице: {len(rows)}")
+
+            for row in rows:
+                cells = row.find_all("td")
+                if len(cells) < 5:
                     continue
 
-                pattern = "/announce/index/" if is_announce else "/lots/index/"
-                raw_id = href.split(pattern)[-1].split("/")[0].split("?")[0]
-                if not raw_id.isdigit():
+                # Cell[0] has the announce link with id
+                link_tag = cells[0].find("a", href=True)
+                if not link_tag:
+                    continue
+                href = link_tag["href"]
+                if "/announce/index/" not in href:
                     continue
 
-                uid = ("lot_" if is_lot else "") + raw_id
-                if uid in seen_ids:
+                raw_id = href.split("/announce/index/")[-1].split("/")[0].split("?")[0]
+                if not raw_id.isdigit() or raw_id in seen_ids:
                     continue
-                seen_ids.add(uid)
+                seen_ids.add(raw_id)
 
-                row = a_tag.find_parent("tr")
-                cells = row.find_all("td") if row else []
-
-                title = a_tag.get_text(strip=True)
-                # Strip leading lot-number prefix like "16957082-1 " or "12345678 "
-                import re as _re
-                title = _re.sub(r"^\d{5,}-\S*\s*", "", title).strip()
+                # Title: cell[2] has lot description + optional "История" link
+                # Use only the first <a> text inside cell[2], or first text node
+                lot_link = cells[2].find("a")
+                if lot_link:
+                    title = lot_link.get_text(strip=True)
+                else:
+                    title = cells[2].get_text(strip=True)
+                # Remove trailing "История" artifact
+                title = _re.sub(r"\s*История\s*$", "", title).strip()
                 if not title or len(title) < 5:
-                    title = cells[1].get_text(strip=True) if len(cells) > 1 else f"Тендер {raw_id}"
+                    title = cells[1].get_text(strip=True)
                     title = _re.sub(r"^\d{5,}-\S*\s*", "", title).strip()
+                if not title:
+                    title = f"Тендер {raw_id}"
 
-                customer = cells[2].get_text(strip=True) if len(cells) > 2 else ""
-
+                # Budget: cell[4] = "450 000.00" (spaces as thousands sep)
                 budget = 0.0
-                for idx in [3, 4, 5]:
-                    if len(cells) > idx:
-                        raw = cells[idx].get_text(strip=True)
-                        cleaned = "".join(c for c in raw if c.isdigit() or c == ".")
-                        if cleaned:
-                            try:
-                                budget = float(cleaned)
-                                break
-                            except ValueError:
-                                pass
+                budget_raw = cells[4].get_text(strip=True)
+                budget_clean = "".join(c for c in budget_raw if c.isdigit() or c == ".")
+                if budget_clean:
+                    try:
+                        budget = float(budget_clean)
+                    except ValueError:
+                        pass
 
-                deadline = ""
-                for idx in [4, 5, 6]:
-                    if len(cells) > idx:
-                        txt = cells[idx].get_text(strip=True)
-                        if len(txt) >= 8 and any(c.isdigit() for c in txt):
-                            deadline = txt
-                            break
+                # Method and status for description
+                method = cells[5].get_text(strip=True) if len(cells) > 5 else ""
+                status = cells[6].get_text(strip=True) if len(cells) > 6 else ""
 
                 full_url = ("https://goszakup.gov.kz" + href) if href.startswith("/") else href
                 results.append({
                     "id": raw_id,
                     "title": title,
-                    "customer": customer,
+                    "customer": "",          # not in search results, need detail page
                     "budget": budget,
-                    "deadline": deadline,
+                    "deadline": "",          # not in search results table
+                    "method": method,
+                    "status": status,
                     "url": full_url,
                     "keyword": keyword,
                 })
@@ -477,7 +497,7 @@ def save_web_tenders(tenders: list) -> int:
             """, (
                 external_id, "goszakup",
                 t["title"],
-                f"Найдено по запросу: {t.get('keyword', '')}",
+                f"{t.get('method', '')} | Запрос: {t.get('keyword', '')} | {t.get('status', '')}",
                 t["budget"], "KZT",
                 t["deadline"],
                 t["customer"],
@@ -1123,10 +1143,17 @@ class TenderAPIHandler(BaseHTTPRequestHandler):
                         if len(unique_kws) >= 30:
                             break
 
+                print(f"🔎 fetch-web: {len(unique_kws)} ключевых слов")
                 found = fetch_goszakup_web(unique_kws, limit=60)
                 saved = save_web_tenders(found)
-                run_analysis_for_all_clients()
-                self._json({"found": len(found), "saved": saved})
+                if found:
+                    run_analysis_for_all_clients()
+                self._json({
+                    "found": len(found),
+                    "saved": saved,
+                    "keywords_used": unique_kws[:10],
+                    "note": "Нет доступа к goszakup.gov.kz с этого сервера" if len(found) == 0 else ""
+                })
 
             elif parsed.path == "/api/analyze":
                 user = self._auth()
