@@ -6,12 +6,20 @@ Tender Analysis System - Backend
 
 import json
 import os
+import base64
 import sqlite3
 import hashlib
 import secrets
 import requests
 from datetime import datetime, date
 from typing import Optional
+
+try:
+    import pdfplumber
+    import io
+    HAS_PDF = True
+except ImportError:
+    HAS_PDF = False
 
 # ============================================================
 # НАСТРОЙКИ
@@ -410,6 +418,79 @@ MAYBE = можно рассмотреть при определённых усл
         }
 
 
+def extract_text_from_pdf(pdf_base64: str) -> str:
+    """Извлекает текст из PDF переданного как base64"""
+    if not HAS_PDF:
+        raise Exception("pdfplumber не установлен")
+    pdf_bytes = base64.b64decode(pdf_base64)
+    text_parts = []
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        for page in pdf.pages:
+            t = page.extract_text()
+            if t:
+                text_parts.append(t)
+    return "\n".join(text_parts)
+
+
+def analyze_specification(text: str) -> dict:
+    """
+    Анализирует техническую спецификацию на соответствие Algimed и Resol.
+    Ищет скрытые закупки товаров внутри тендеров на услуги/работы.
+    """
+    prompt = f"""Ты эксперт по тендерам и закупкам Казахстана. Анализируй техническую спецификацию.
+
+КОМПАНИЯ ALGIMED:
+- Сфера: лабораторное и медицинское оборудование, реагенты
+- Бренды: Thermo Fisher Scientific, Eppendorf и аналоги
+- Товары: центрифуги, ПЦР-оборудование, спектрофотометры, пипетки, инкубаторы, автоклавы, микроскопы, хроматографы, биохимические анализаторы, ИФА/ELISA, ламинарные боксы, культуральные среды, лабораторные реагенты, расходные материалы для лаборатории
+
+КОМПАНИЯ RESOL:
+- Сфера: промышленная химия, нефтехимия
+- Товары: катализаторы для НПЗ, теплообменники, промышленные реагенты, деэмульгаторы, ингибиторы коррозии, абсорбенты, реакторное оборудование, химикаты для нефтепереработки
+
+ВАЖНО — ищи "скрытые" закупки:
+Тендер может называться "Услуги по техническому обслуживанию", "Работы по модернизации" или просто "Услуги", но внутри ТЗ написано что нужно ПОСТАВИТЬ конкретное оборудование, реагенты или химикаты. Это скрытая закупка товара — её нужно выявлять.
+
+ИГНОРИРУЙ полностью: строительство зданий, питание/еда, клининг/уборка, дорожные работы, IT-разработка ПО, охрана.
+
+ТЕКСТ СПЕЦИФИКАЦИИ:
+{text[:5000]}
+
+Ответь ТОЛЬКО в JSON (без markdown-блоков):
+{{
+    "verdict": "SUITABLE" или "NOT_SUITABLE",
+    "client": "Algimed" или "Resol" или "Both" или "None",
+    "score": число от 0 до 100,
+    "reasoning": "объяснение 2-3 предложения на русском",
+    "quote": "точная цитата из текста которая подтверждает вывод, или пустая строка если нет",
+    "is_hidden": true или false,
+    "hidden_explanation": "объяснение если это скрытая закупка, иначе пустая строка"
+}}"""
+
+    try:
+        resp = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            json={
+                "model": "llama-3.3-70b-versatile",
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": 800,
+                "temperature": 0.1
+            },
+            timeout=30
+        )
+        data = resp.json()
+        response_text = data["choices"][0]["message"]["content"]
+        response_text = response_text.replace("```json", "").replace("```", "").strip()
+        return json.loads(response_text)
+    except Exception as e:
+        return {
+            "verdict": "NOT_SUITABLE", "client": "None", "score": 0,
+            "reasoning": f"Ошибка анализа: {e}", "quote": "",
+            "is_hidden": False, "hidden_explanation": ""
+        }
+
+
 def run_analysis_for_all_clients():
     """Запускает анализ всех непроверенных тендеров для всех клиентов"""
     conn = sqlite3.connect(DB_PATH)
@@ -771,6 +852,24 @@ class TenderAPIHandler(BaseHTTPRequestHandler):
                 create_user(body["username"], body["password"],
                             body.get("client_id"), body.get("is_admin", 0))
                 self._json({"status": "ok"})
+
+            elif parsed.path == "/api/analyze-spec":
+                user = self._auth()
+                if not user:
+                    return
+                text = body.get("text", "")
+                pdf_b64 = body.get("pdf_base64", "")
+                if pdf_b64:
+                    try:
+                        text = extract_text_from_pdf(pdf_b64)
+                    except Exception as e:
+                        self._json({"error": f"Ошибка чтения PDF: {e}"}, 400)
+                        return
+                if not text.strip():
+                    self._json({"error": "Пустой текст"}, 400)
+                    return
+                result = analyze_specification(text)
+                self._json(result)
 
             elif parsed.path == "/api/fetch":
                 user = self._auth()

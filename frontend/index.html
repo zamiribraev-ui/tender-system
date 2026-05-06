@@ -651,6 +651,7 @@
   <div class="header-actions">
     <span id="headerUser" style="font-size:13px;color:var(--muted)"></span>
     <button class="btn btn-secondary btn-sm" id="btnAddClient" style="display:none" onclick="openAddClient()">+ Клиент</button>
+    <button class="btn btn-secondary btn-sm" onclick="openSpecModal()">📄 Анализ ТЗ</button>
     <button class="btn btn-primary btn-sm" id="btnRefresh" style="display:none" onclick="runFetchAndAnalyze()">🔄 Обновить тендеры</button>
     <button class="btn btn-secondary btn-sm" onclick="doLogout()">Выйти</button>
   </div>
@@ -767,6 +768,47 @@
       <button class="btn btn-secondary" onclick="closeAddClient()">Отмена</button>
       <button class="btn btn-primary" onclick="saveClient()">Сохранить</button>
     </div>
+  </div>
+</div>
+
+<!-- SPEC ANALYSIS MODAL -->
+<div class="modal-overlay" id="specModal" onclick="if(event.target===this)closeSpecModal()">
+  <div class="modal" style="position:relative;max-width:700px">
+    <button class="modal-close" onclick="closeSpecModal()">✕</button>
+    <div class="modal-title">📄 Анализ технической спецификации</div>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:20px">Загрузите PDF или вставьте текст ТЗ. AI найдёт скрытые закупки и определит подходит ли тендер для Algimed или Resol.</p>
+
+    <div id="specInput">
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <button class="btn btn-secondary btn-sm" id="tabPdf" onclick="switchSpecTab('pdf')" style="border-color:var(--accent);color:var(--text)">📎 PDF файл</button>
+        <button class="btn btn-secondary btn-sm" id="tabText" onclick="switchSpecTab('text')">✏️ Вставить текст</button>
+      </div>
+
+      <div id="pdfTab">
+        <div id="dropzone" onclick="document.getElementById('pdfFile').click()"
+          style="border:2px dashed var(--border);border-radius:12px;padding:40px;text-align:center;cursor:pointer;transition:all 0.2s"
+          ondragover="event.preventDefault();this.style.borderColor='var(--accent)'"
+          ondragleave="this.style.borderColor='var(--border)'"
+          ondrop="handleDrop(event)">
+          <div style="font-size:32px;margin-bottom:8px">📎</div>
+          <div style="color:var(--text);font-weight:500">Перетащите PDF или нажмите для выбора</div>
+          <div style="color:var(--muted);font-size:12px;margin-top:4px">Техническое задание, спецификация, лот</div>
+        </div>
+        <input type="file" id="pdfFile" accept=".pdf" style="display:none" onchange="handleFileSelect(event)">
+        <div id="fileName" style="margin-top:8px;font-size:13px;color:var(--accent)"></div>
+      </div>
+
+      <div id="textTab" style="display:none">
+        <textarea id="specText" placeholder="Вставьте текст технической спецификации или описание тендера..." style="min-height:160px"></textarea>
+      </div>
+
+      <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:20px">
+        <button class="btn btn-secondary" onclick="closeSpecModal()">Отмена</button>
+        <button class="btn btn-primary" id="btnAnalyzeSpec" onclick="runSpecAnalysis()">🔍 Анализировать</button>
+      </div>
+    </div>
+
+    <div id="specResult" style="display:none"></div>
   </div>
 </div>
 
@@ -1086,6 +1128,118 @@ const demoTenders = [
   { id:4, source:'goszakup', title:'Разработка мобильного приложения для граждан', customer:'Министерство труда и социальной защиты', budget:28000000, currency:'KZT', deadline:'2026-06-20', recommendation:'YES', score:91, summary:'Отличный тендер для IT компании. Разработка мобильного приложения — прямой профиль.', reasons:['Точное соответствие специализации','Разработка под iOS и Android','Госзаказчик'], risks:['Строгие требования к безопасности данных'], url:'#' },
   { id:5, source:'samruk', title:'Ремонт кровли производственного здания', customer:'АО КазМунайГаз', budget:35000000, currency:'KZT', deadline:'2026-05-25', recommendation:'NO', score:5, summary:'Строительные работы не соответствуют профилю компании.', reasons:[], risks:['Не профильный вид деятельности'], url:'#' }
 ];
+
+// ---- SPEC ANALYSIS ----
+let specPdfBase64 = null;
+let specTab = 'pdf';
+
+function openSpecModal() {
+  document.getElementById('specModal').classList.add('open');
+  document.getElementById('specInput').style.display = '';
+  document.getElementById('specResult').style.display = 'none';
+  specPdfBase64 = null;
+  document.getElementById('fileName').textContent = '';
+  document.getElementById('specText').value = '';
+}
+function closeSpecModal() { document.getElementById('specModal').classList.remove('open'); }
+
+function switchSpecTab(tab) {
+  specTab = tab;
+  document.getElementById('pdfTab').style.display = tab === 'pdf' ? '' : 'none';
+  document.getElementById('textTab').style.display = tab === 'text' ? '' : 'none';
+  document.getElementById('tabPdf').style.borderColor = tab === 'pdf' ? 'var(--accent)' : 'var(--border)';
+  document.getElementById('tabPdf').style.color = tab === 'pdf' ? 'var(--text)' : 'var(--muted)';
+  document.getElementById('tabText').style.borderColor = tab === 'text' ? 'var(--accent)' : 'var(--border)';
+  document.getElementById('tabText').style.color = tab === 'text' ? 'var(--text)' : 'var(--muted)';
+}
+
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('dropzone').style.borderColor = 'var(--border)';
+  const file = e.dataTransfer.files[0];
+  if (file) loadPdfFile(file);
+}
+function handleFileSelect(e) { if (e.target.files[0]) loadPdfFile(e.target.files[0]); }
+
+function loadPdfFile(file) {
+  document.getElementById('fileName').textContent = '📎 ' + file.name;
+  const reader = new FileReader();
+  reader.onload = e => { specPdfBase64 = e.target.result.split(',')[1]; };
+  reader.readAsDataURL(file);
+}
+
+async function runSpecAnalysis() {
+  const btn = document.getElementById('btnAnalyzeSpec');
+  btn.textContent = '⏳ Анализирую...';
+  btn.disabled = true;
+
+  try {
+    const body = specTab === 'pdf' && specPdfBase64
+      ? { pdf_base64: specPdfBase64 }
+      : { text: document.getElementById('specText').value };
+
+    const res = await fetch(`${API}/api/analyze-spec`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (data.error) { showToast('❌ ' + data.error); return; }
+    showSpecResult(data);
+  } catch(e) {
+    showToast('⚠️ Ошибка запроса');
+  } finally {
+    btn.textContent = '🔍 Анализировать';
+    btn.disabled = false;
+  }
+}
+
+function showSpecResult(r) {
+  document.getElementById('specInput').style.display = 'none';
+  const res = document.getElementById('specResult');
+  res.style.display = '';
+
+  const suitable = r.verdict === 'SUITABLE';
+  const verdictColor = suitable ? 'var(--green)' : 'var(--red)';
+  const verdictBg = suitable ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)';
+  const verdictText = suitable ? '✓ ПОДХОДИТ' : '✗ НЕ ПОДХОДИТ';
+
+  const clientColors = { Algimed: '#06b6d4', Resol: '#f59e0b', Both: '#8b5cf6', None: 'var(--muted)' };
+  const clientBg = { Algimed: 'rgba(6,182,212,0.12)', Resol: 'rgba(245,158,11,0.12)', Both: 'rgba(139,92,246,0.12)', None: 'rgba(100,116,139,0.12)' };
+  const scoreColor = r.score >= 70 ? 'var(--green)' : r.score >= 40 ? 'var(--yellow)' : 'var(--red)';
+
+  res.innerHTML = `
+    <div style="display:flex;gap:12px;align-items:center;margin-bottom:24px;flex-wrap:wrap">
+      <span style="background:${verdictBg};color:${verdictColor};padding:8px 20px;border-radius:8px;font-family:'Unbounded',sans-serif;font-size:14px;font-weight:700">${verdictText}</span>
+      ${r.client !== 'None' ? `<span style="background:${clientBg[r.client]};color:${clientColors[r.client]};padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600">🏢 ${r.client}</span>` : ''}
+      <span style="margin-left:auto;font-size:13px;color:var(--muted)">Оценка: <b style="color:${scoreColor};font-size:18px">${r.score}</b>/100</span>
+    </div>
+
+    <div style="height:6px;background:var(--border);border-radius:3px;margin-bottom:20px;overflow:hidden">
+      <div style="height:100%;width:${r.score}%;background:${scoreColor};border-radius:3px;transition:width 0.6s ease"></div>
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-label">Вывод AI</div>
+      <div class="detail-text" style="background:var(--surface2);padding:14px;border-radius:8px;border-left:3px solid ${verdictColor}">${r.reasoning}</div>
+    </div>
+
+    ${r.quote ? `<div class="detail-section">
+      <div class="detail-label">Цитата из документа</div>
+      <div style="background:var(--surface2);padding:14px;border-radius:8px;border-left:3px solid var(--accent);font-size:13px;font-style:italic;color:var(--text)">"${r.quote}"</div>
+    </div>` : ''}
+
+    ${r.is_hidden ? `<div class="detail-section">
+      <div class="detail-label" style="color:var(--yellow)">⚠️ Скрытая закупка товара</div>
+      <div class="detail-text" style="background:rgba(245,158,11,0.08);padding:14px;border-radius:8px;border-left:3px solid var(--yellow)">${r.hidden_explanation}</div>
+    </div>` : ''}
+
+    <div style="margin-top:24px;padding-top:20px;border-top:1px solid var(--border);display:flex;gap:12px">
+      <button class="btn btn-primary" onclick="openSpecModal()">🔍 Новый анализ</button>
+      <button class="btn btn-secondary" onclick="closeSpecModal()">Закрыть</button>
+    </div>
+  `;
+}
 
 function loadDemoData() {
   document.getElementById('stat-total').textContent = 5;
