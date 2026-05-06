@@ -1,0 +1,1116 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TenderAI — Анализ тендеров Казахстана</title>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;600;800&family=Golos+Text:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0c10;
+    --surface: #10141c;
+    --surface2: #161b26;
+    --border: #1e2535;
+    --accent: #3b82f6;
+    --accent2: #06b6d4;
+    --green: #10b981;
+    --red: #ef4444;
+    --yellow: #f59e0b;
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --goszakup: #3b82f6;
+    --samruk: #8b5cf6;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Golos Text', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* HEADER */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 64px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 18px;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -0.5px;
+  }
+
+  .logo span {
+    font-weight: 300;
+    opacity: 0.7;
+  }
+
+  .header-actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+
+  /* CLIENT SELECTOR */
+  .client-bar {
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 32px;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .client-label {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: 'Unbounded', sans-serif;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .client-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 8px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: 'Golos Text', sans-serif;
+    font-size: 14px;
+    transition: all 0.2s;
+  }
+
+  .client-btn:hover { border-color: var(--accent); color: var(--text); }
+  .client-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+
+  /* MAIN LAYOUT */
+  .layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    min-height: calc(100vh - 64px - 60px);
+  }
+
+  /* SIDEBAR */
+  aside {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 24px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .sidebar-title {
+    font-size: 10px;
+    font-family: 'Unbounded', sans-serif;
+    letter-spacing: 2px;
+    color: var(--muted);
+    padding: 0 8px;
+    margin-bottom: 4px;
+  }
+
+  .filter-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-size: 14px;
+    color: var(--muted);
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+    font-family: 'Golos Text', sans-serif;
+  }
+
+  .filter-btn:hover { background: var(--surface2); color: var(--text); }
+  .filter-btn.active { background: var(--surface2); color: var(--text); }
+
+  .filter-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .filter-count {
+    margin-left: auto;
+    font-size: 12px;
+    background: var(--surface2);
+    padding: 2px 8px;
+    border-radius: 999px;
+    color: var(--muted);
+  }
+
+  .sidebar-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 8px 0;
+  }
+
+  /* MAIN CONTENT */
+  main {
+    padding: 24px;
+    overflow-y: auto;
+  }
+
+  /* STATS STRIP */
+  .stats-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+  }
+
+  .stat-card.total::before { background: var(--accent); }
+  .stat-card.yes::before { background: var(--green); }
+  .stat-card.no::before { background: var(--red); }
+  .stat-card.maybe::before { background: var(--yellow); }
+
+  .stat-value {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 32px;
+    font-weight: 800;
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+
+  .stat-label {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  /* TOOLBAR */
+  .toolbar {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+
+  .source-filter {
+    display: flex;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .source-btn {
+    padding: 8px 16px;
+    font-size: 13px;
+    cursor: pointer;
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-family: 'Golos Text', sans-serif;
+    transition: all 0.15s;
+  }
+
+  .source-btn:hover { color: var(--text); }
+  .source-btn.active { background: var(--surface2); color: var(--text); }
+
+  .toolbar-right { margin-left: auto; display: flex; gap: 8px; }
+
+  /* TENDERS GRID */
+  .tenders-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* TENDER CARD */
+  .tender-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    transition: all 0.2s;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .tender-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-1px);
+  }
+
+  .tender-card::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+  }
+
+  .tender-card.YES::before { background: var(--green); }
+  .tender-card.NO::before { background: var(--red); }
+  .tender-card.MAYBE::before { background: var(--yellow); }
+  .tender-card.null::before { background: var(--border); }
+
+  .card-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .card-source {
+    font-size: 10px;
+    font-family: 'Unbounded', sans-serif;
+    letter-spacing: 1px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .source-goszakup { background: rgba(59,130,246,0.15); color: var(--goszakup); }
+  .source-samruk { background: rgba(139,92,246,0.15); color: var(--samruk); }
+
+  .card-title {
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.4;
+    flex: 1;
+  }
+
+  .rec-badge {
+    flex-shrink: 0;
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-family: 'Unbounded', sans-serif;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+
+  .rec-YES { background: rgba(16,185,129,0.15); color: var(--green); }
+  .rec-NO { background: rgba(239,68,68,0.15); color: var(--red); }
+  .rec-MAYBE { background: rgba(245,158,11,0.15); color: var(--yellow); }
+
+  .card-meta {
+    display: flex;
+    gap: 24px;
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  .card-meta span { display: flex; align-items: center; gap: 6px; }
+
+  .score-bar {
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+
+  .score-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.5s ease;
+  }
+
+  .card-summary {
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.6;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+
+  .card-budget {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .card-deadline {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  /* BUTTONS */
+  .btn {
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-family: 'Golos Text', sans-serif;
+    font-size: 14px;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s;
+    font-weight: 500;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: white;
+  }
+
+  .btn-primary:hover { background: #2563eb; }
+
+  .btn-secondary {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+
+  .btn-secondary:hover { border-color: var(--accent); }
+
+  .btn-sm { padding: 7px 14px; font-size: 13px; }
+
+  /* MODAL */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(4px);
+    z-index: 200;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  .modal-overlay.open { display: flex; }
+
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    width: 100%;
+    max-width: 640px;
+    max-height: 85vh;
+    overflow-y: auto;
+    padding: 32px;
+  }
+
+  .modal-title {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 24px;
+  }
+
+  .modal-close {
+    position: absolute;
+    top: 16px; right: 16px;
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 20px;
+    padding: 4px 8px;
+  }
+
+  .detail-section {
+    margin-bottom: 20px;
+  }
+
+  .detail-label {
+    font-size: 11px;
+    font-family: 'Unbounded', sans-serif;
+    letter-spacing: 1px;
+    color: var(--muted);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+  }
+
+  .detail-text {
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .list-items {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .list-item {
+    display: flex;
+    gap: 8px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text);
+  }
+
+  .list-item::before {
+    content: '→';
+    color: var(--accent);
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .risk-item::before { color: var(--red); content: '!'; font-weight: bold; }
+
+  /* FORM */
+  .form-group {
+    margin-bottom: 16px;
+  }
+
+  label {
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 6px;
+    font-family: 'Unbounded', sans-serif;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+
+  input, textarea, select {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    color: var(--text);
+    font-family: 'Golos Text', sans-serif;
+    font-size: 14px;
+    transition: border-color 0.2s;
+  }
+
+  input:focus, textarea:focus, select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  textarea { resize: vertical; min-height: 80px; }
+
+  /* EMPTY STATE */
+  .empty {
+    text-align: center;
+    padding: 80px 20px;
+    color: var(--muted);
+  }
+
+  .empty-icon { font-size: 48px; margin-bottom: 16px; }
+  .empty-title { font-family: 'Unbounded', sans-serif; font-size: 16px; margin-bottom: 8px; }
+
+  /* LOADING */
+  .loading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* TOAST */
+  .toast {
+    position: fixed;
+    bottom: 24px; right: 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 20px;
+    font-size: 14px;
+    z-index: 300;
+    animation: slideIn 0.3s ease;
+    display: none;
+  }
+
+  .toast.show { display: block; }
+  @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  /* LOGIN SCREEN */
+  .login-screen {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    z-index: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .login-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 48px 40px;
+    width: 100%;
+    max-width: 400px;
+  }
+
+  .login-logo {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 28px;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 8px;
+  }
+
+  .login-subtitle {
+    color: var(--muted);
+    font-size: 14px;
+    margin-bottom: 32px;
+  }
+
+  .login-error {
+    background: rgba(239,68,68,0.1);
+    border: 1px solid rgba(239,68,68,0.3);
+    color: var(--red);
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    margin-bottom: 16px;
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+<!-- LOGIN SCREEN -->
+<div class="login-screen" id="loginScreen">
+  <div class="login-box">
+    <div class="login-logo">TenderAI</div>
+    <div class="login-subtitle">Система анализа тендеров Казахстана</div>
+    <div class="login-error" id="loginError"></div>
+    <div class="form-group">
+      <label>Логин</label>
+      <input id="loginUsername" placeholder="admin" autocomplete="username" onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <div class="form-group">
+      <label>Пароль</label>
+      <input id="loginPassword" type="password" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="doLogin()">Войти</button>
+  </div>
+</div>
+
+<header>
+  <div class="logo">Tender<span>AI</span></div>
+  <div class="header-actions">
+    <span id="headerUser" style="font-size:13px;color:var(--muted)"></span>
+    <button class="btn btn-secondary btn-sm" id="btnAddClient" style="display:none" onclick="openAddClient()">+ Клиент</button>
+    <button class="btn btn-primary btn-sm" id="btnRefresh" style="display:none" onclick="runFetchAndAnalyze()">🔄 Обновить тендеры</button>
+    <button class="btn btn-secondary btn-sm" onclick="doLogout()">Выйти</button>
+  </div>
+</header>
+
+<div class="client-bar">
+  <span class="client-label">Клиент:</span>
+  <div id="clientBtns" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+</div>
+
+<div class="layout">
+  <aside>
+    <div class="sidebar-title">Рекомендация</div>
+    <button class="filter-btn active" data-rec="" onclick="setRecFilter(this, '')">
+      <span class="filter-dot" style="background:var(--muted)"></span>
+      Все тендеры
+      <span class="filter-count" id="cnt-all">–</span>
+    </button>
+    <button class="filter-btn" data-rec="YES" onclick="setRecFilter(this, 'YES')">
+      <span class="filter-dot" style="background:var(--green)"></span>
+      Участвовать
+      <span class="filter-count" id="cnt-yes">–</span>
+    </button>
+    <button class="filter-btn" data-rec="MAYBE" onclick="setRecFilter(this, 'MAYBE')">
+      <span class="filter-dot" style="background:var(--yellow)"></span>
+      Рассмотреть
+      <span class="filter-count" id="cnt-maybe">–</span>
+    </button>
+    <button class="filter-btn" data-rec="NO" onclick="setRecFilter(this, 'NO')">
+      <span class="filter-dot" style="background:var(--red)"></span>
+      Не подходит
+      <span class="filter-count" id="cnt-no">–</span>
+    </button>
+
+    <div class="sidebar-divider"></div>
+    <div class="sidebar-title">Источник</div>
+    <button class="filter-btn active" data-src="" onclick="setSrcFilter(this, '')">
+      <span class="filter-dot" style="background:var(--muted)"></span>
+      Все источники
+    </button>
+    <button class="filter-btn" data-src="goszakup" onclick="setSrcFilter(this, 'goszakup')">
+      <span class="filter-dot" style="background:var(--goszakup)"></span>
+      Госзакуп
+    </button>
+    <button class="filter-btn" data-src="samruk" onclick="setSrcFilter(this, 'samruk')">
+      <span class="filter-dot" style="background:var(--samruk)"></span>
+      Самрук-Казына
+    </button>
+  </aside>
+
+  <main>
+    <div class="stats-strip">
+      <div class="stat-card total">
+        <div class="stat-value" id="stat-total">–</div>
+        <div class="stat-label">Всего тендеров</div>
+      </div>
+      <div class="stat-card yes">
+        <div class="stat-value" id="stat-yes" style="color:var(--green)">–</div>
+        <div class="stat-label">Рекомендовано</div>
+      </div>
+      <div class="stat-card maybe">
+        <div class="stat-value" id="stat-maybe" style="color:var(--yellow)">–</div>
+        <div class="stat-label">На рассмотрение</div>
+      </div>
+      <div class="stat-card no">
+        <div class="stat-value" id="stat-no" style="color:var(--red)">–</div>
+        <div class="stat-label">Не подходят</div>
+      </div>
+    </div>
+
+    <div id="loadingBar" class="loading" style="margin-bottom:16px;display:none">
+      <div class="spinner"></div>
+      <span id="loadingText">Загрузка...</span>
+    </div>
+
+    <div id="tendersList" class="tenders-grid"></div>
+  </main>
+</div>
+
+<!-- TENDER DETAIL MODAL -->
+<div class="modal-overlay" id="detailModal" onclick="if(event.target===this)closeDetail()">
+  <div class="modal" style="position:relative">
+    <button class="modal-close" onclick="closeDetail()">✕</button>
+    <div id="detailContent"></div>
+  </div>
+</div>
+
+<!-- ADD CLIENT MODAL -->
+<div class="modal-overlay" id="clientModal" onclick="if(event.target===this)closeAddClient()">
+  <div class="modal" style="position:relative">
+    <button class="modal-close" onclick="closeAddClient()">✕</button>
+    <div class="modal-title">Добавить клиента</div>
+    <div class="form-group">
+      <label>Название компании *</label>
+      <input id="cl-name" placeholder="ООО Ромашка KZ">
+    </div>
+    <div class="form-group">
+      <label>Описание деятельности</label>
+      <textarea id="cl-desc" placeholder="Чем занимается компания..."></textarea>
+    </div>
+    <div class="form-group">
+      <label>Отрасль</label>
+      <input id="cl-industry" placeholder="IT / Строительство / Поставки...">
+    </div>
+    <div class="form-group">
+      <label>Ключевые слова (через запятую)</label>
+      <input id="cl-keywords" placeholder="программное обеспечение, разработка, автоматизация">
+    </div>
+    <div class="form-group">
+      <label>Возможности компании</label>
+      <textarea id="cl-caps" placeholder="Что именно умеет делать компания..."></textarea>
+    </div>
+    <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:24px">
+      <button class="btn btn-secondary" onclick="closeAddClient()">Отмена</button>
+      <button class="btn btn-primary" onclick="saveClient()">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = window.location.hostname === 'localhost' ? 'http://localhost:8000' : window.location.origin;
+let currentClient = null;
+let currentRec = '';
+let currentSrc = '';
+let allTenders = [];
+let currentUser = null;
+
+// ---- AUTH ----
+function getToken() { return localStorage.getItem('token'); }
+function setToken(t) { localStorage.setItem('token', t); }
+function clearToken() { localStorage.removeItem('token'); }
+
+function authHeaders() {
+  return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` };
+}
+
+async function doLogin() {
+  const username = document.getElementById('loginUsername').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  const errEl = document.getElementById('loginError');
+  errEl.style.display = 'none';
+
+  try {
+    const res = await fetch(`${API}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (!res.ok) { errEl.textContent = data.error || 'Ошибка'; errEl.style.display = 'block'; return; }
+    setToken(data.token);
+    currentUser = data;
+    document.getElementById('loginScreen').style.display = 'none';
+    applyUserRole();
+    await init();
+  } catch(e) {
+    errEl.textContent = 'Сервер недоступен. Запустите: python backend/main.py';
+    errEl.style.display = 'block';
+  }
+}
+
+async function doLogout() {
+  await fetch(`${API}/api/logout`, { method: 'POST', headers: authHeaders() }).catch(() => {});
+  clearToken();
+  currentUser = null;
+  document.getElementById('loginScreen').style.display = 'flex';
+}
+
+function applyUserRole() {
+  if (!currentUser) return;
+  document.getElementById('headerUser').textContent = `👤 ${currentUser.username}`;
+  if (currentUser.is_admin) {
+    document.getElementById('btnAddClient').style.display = '';
+    document.getElementById('btnRefresh').style.display = '';
+  }
+}
+
+// ---- INIT ----
+async function init() {
+  await loadClients();
+  await loadStats();
+  await loadTenders();
+}
+
+async function checkAuth() {
+  if (!getToken()) return;
+  try {
+    const res = await fetch(`${API}/api/me`, { headers: authHeaders() });
+    if (!res.ok) { clearToken(); return; }
+    currentUser = await res.json();
+    document.getElementById('loginScreen').style.display = 'none';
+    applyUserRole();
+    await init();
+  } catch(e) {}
+}
+
+// ---- CLIENTS ----
+async function loadClients() {
+  try {
+    const res = await fetch(`${API}/api/clients`, { headers: authHeaders() });
+    const clients = await res.json();
+    const wrap = document.getElementById('clientBtns');
+    wrap.innerHTML = '';
+    clients.forEach((c, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'client-btn' + (i === 0 ? ' active' : '');
+      btn.textContent = c.name;
+      btn.onclick = () => selectClient(c, btn);
+      wrap.appendChild(btn);
+      if (i === 0) currentClient = c;
+    });
+  } catch(e) {
+    showToast('⚠️ Бэкенд не запущен. Запусти: python backend/main.py');
+    loadDemoData();
+  }
+}
+
+function selectClient(client, btn) {
+  currentClient = client;
+  document.querySelectorAll('.client-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loadStats();
+  loadTenders();
+}
+
+async function saveClient() {
+  const data = {
+    name: document.getElementById('cl-name').value,
+    description: document.getElementById('cl-desc').value,
+    industry: document.getElementById('cl-industry').value,
+    keywords: document.getElementById('cl-keywords').value,
+    capabilities: document.getElementById('cl-caps').value
+  };
+  if (!data.name) return showToast('Введите название');
+
+  try {
+    await fetch(`${API}/api/clients`, { method: 'POST', headers: authHeaders(), body: JSON.stringify(data) });
+    closeAddClient();
+    await loadClients();
+    showToast('✅ Клиент добавлен');
+  } catch(e) { showToast('Ошибка сохранения'); }
+}
+
+// ---- STATS ----
+async function loadStats() {
+  try {
+    const res = await fetch(`${API}/api/stats?client_id=${currentClient?.id || 1}`, { headers: authHeaders() });
+    const s = await res.json();
+    document.getElementById('stat-total').textContent = s.total || 0;
+    document.getElementById('stat-yes').textContent = s.YES || 0;
+    document.getElementById('stat-maybe').textContent = s.MAYBE || 0;
+    document.getElementById('stat-no').textContent = s.NO || 0;
+    document.getElementById('cnt-all').textContent = s.total || 0;
+    document.getElementById('cnt-yes').textContent = s.YES || 0;
+    document.getElementById('cnt-maybe').textContent = s.MAYBE || 0;
+    document.getElementById('cnt-no').textContent = s.NO || 0;
+  } catch(e) {}
+}
+
+// ---- TENDERS ----
+async function loadTenders() {
+  showLoading('Загрузка тендеров...');
+  try {
+    let url = `${API}/api/tenders?client_id=${currentClient?.id || 1}`;
+    if (currentRec) url += `&recommendation=${currentRec}`;
+    if (currentSrc) url += `&source=${currentSrc}`;
+    const res = await fetch(url, { headers: authHeaders() });
+    allTenders = await res.json();
+    renderTenders(allTenders);
+  } catch(e) {
+    renderTenders(demoTenders);
+  }
+  hideLoading();
+}
+
+function renderTenders(tenders) {
+  const wrap = document.getElementById('tendersList');
+  if (!tenders.length) {
+    wrap.innerHTML = `<div class="empty">
+      <div class="empty-icon">📋</div>
+      <div class="empty-title">Тендеров не найдено</div>
+      <div style="font-size:13px;color:var(--muted)">Попробуйте изменить фильтры или обновить данные</div>
+    </div>`;
+    return;
+  }
+
+  wrap.innerHTML = tenders.map(t => {
+    const rec = t.recommendation || 'null';
+    const score = t.score || 0;
+    const scoreColor = score >= 70 ? 'var(--green)' : score >= 40 ? 'var(--yellow)' : 'var(--red)';
+    const budget = t.budget ? (t.budget / 1000000).toFixed(1) + ' млн ₸' : 'Не указан';
+    const deadline = t.deadline ? new Date(t.deadline).toLocaleDateString('ru-RU') : '—';
+
+    return `<div class="tender-card ${rec}" onclick='showDetail(${JSON.stringify(t).replace(/'/g, "\\'")})'> 
+      <div class="card-header">
+        <span class="card-source source-${t.source}">${t.source === 'goszakup' ? 'ГОСЗАКУП' : 'САМРУК'}</span>
+        <span class="card-title">${t.title || 'Без названия'}</span>
+        ${rec !== 'null' ? `<span class="rec-badge rec-${rec}">${rec === 'YES' ? '✓ ДА' : rec === 'NO' ? '✗ НЕТ' : '? МОЖЕТ'}</span>` : ''}
+      </div>
+      ${rec !== 'null' ? `<div class="score-bar"><div class="score-fill" style="width:${score}%;background:${scoreColor}"></div></div>` : ''}
+      <div class="card-meta">
+        <span>🏢 ${t.customer || 'Не указан'}</span>
+        ${rec !== 'null' ? `<span>📊 Оценка: ${score}/100</span>` : ''}
+      </div>
+      ${t.summary ? `<div class="card-summary">${t.summary}</div>` : ''}
+      <div class="card-footer">
+        <div class="card-budget">${budget}</div>
+        <div class="card-deadline">Дедлайн: ${deadline}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ---- DETAIL ----
+function showDetail(t) {
+  const rec = t.recommendation;
+  const recLabels = { YES: '✓ Рекомендуем участвовать', NO: '✗ Не подходит', MAYBE: '? Рассмотреть' };
+  const recColors = { YES: 'var(--green)', NO: 'var(--red)', MAYBE: 'var(--yellow)' };
+
+  const reasons = Array.isArray(t.reasons) ? t.reasons : JSON.parse(t.reasons || '[]');
+  const risks = Array.isArray(t.risks) ? t.risks : JSON.parse(t.risks || '[]');
+
+  document.getElementById('detailContent').innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px">
+      <span class="card-source source-${t.source}" style="font-size:11px">${t.source === 'goszakup' ? 'ГОСЗАКУП' : 'САМРУК'}</span>
+      ${rec ? `<span style="color:${recColors[rec]};font-weight:600;font-size:14px">${recLabels[rec]}</span>` : ''}
+      ${t.score ? `<span style="margin-left:auto;color:var(--muted);font-size:13px">Оценка: <b style="color:var(--text)">${t.score}/100</b></span>` : ''}
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-label">Название</div>
+      <div class="detail-text" style="font-size:16px;font-weight:600">${t.title}</div>
+    </div>
+
+    ${t.summary ? `<div class="detail-section">
+      <div class="detail-label">Вывод AI</div>
+      <div class="detail-text" style="background:var(--surface2);padding:14px;border-radius:8px;border-left:3px solid ${recColors[rec]||'var(--accent)'}">${t.summary}</div>
+    </div>` : ''}
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+      <div>
+        <div class="detail-label">Бюджет</div>
+        <div style="font-family:'Unbounded',sans-serif;font-size:18px;font-weight:700">${t.budget ? (t.budget/1000000).toFixed(1) + ' млн ₸' : 'Не указан'}</div>
+      </div>
+      <div>
+        <div class="detail-label">Дедлайн</div>
+        <div style="font-size:16px;font-weight:600">${t.deadline ? new Date(t.deadline).toLocaleDateString('ru-RU') : '—'}</div>
+      </div>
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-label">Заказчик</div>
+      <div class="detail-text">${t.customer || 'Не указан'}</div>
+    </div>
+
+    ${reasons.length ? `<div class="detail-section">
+      <div class="detail-label">Причины рекомендации</div>
+      <div class="list-items">${reasons.map(r => `<div class="list-item">${r}</div>`).join('')}</div>
+    </div>` : ''}
+
+    ${risks.length ? `<div class="detail-section">
+      <div class="detail-label">Риски</div>
+      <div class="list-items">${risks.map(r => `<div class="list-item risk-item">${r}</div>`).join('')}</div>
+    </div>` : ''}
+
+    <div style="margin-top:24px;padding-top:20px;border-top:1px solid var(--border);display:flex;gap:12px">
+      <a href="${t.url}" target="_blank" class="btn btn-primary">Открыть на сайте →</a>
+      <button class="btn btn-secondary" onclick="closeDetail()">Закрыть</button>
+    </div>
+  `;
+
+  document.getElementById('detailModal').classList.add('open');
+}
+
+function closeDetail() { document.getElementById('detailModal').classList.remove('open'); }
+
+// ---- FILTERS ----
+function setRecFilter(btn, rec) {
+  currentRec = rec;
+  document.querySelectorAll('[data-rec]').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loadTenders();
+}
+
+function setSrcFilter(btn, src) {
+  currentSrc = src;
+  document.querySelectorAll('[data-src]').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loadTenders();
+}
+
+// ---- FETCH & ANALYZE ----
+async function runFetchAndAnalyze() {
+  showLoading('Загружаю тендеры с сайтов...');
+  try {
+    await fetch(`${API}/api/fetch`, { method: 'POST', headers: authHeaders() });
+    document.getElementById('loadingText').textContent = 'AI анализирует тендеры...';
+    await fetch(`${API}/api/analyze`, { method: 'POST', headers: authHeaders() });
+    await loadStats();
+    await loadTenders();
+    showToast('✅ Обновление завершено!');
+  } catch(e) {
+    showToast('⚠️ Ошибка. Убедись что бэкенд запущен.');
+  }
+  hideLoading();
+}
+
+// ---- CLIENT MODAL ----
+function openAddClient() { document.getElementById('clientModal').classList.add('open'); }
+function closeAddClient() { document.getElementById('clientModal').classList.remove('open'); }
+
+// ---- UTILS ----
+function showLoading(text) {
+  document.getElementById('loadingText').textContent = text;
+  document.getElementById('loadingBar').style.display = 'flex';
+}
+function hideLoading() { document.getElementById('loadingBar').style.display = 'none'; }
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3500);
+}
+
+// DEMO DATA (когда бэкенд не запущен)
+const demoTenders = [
+  { id:1, source:'goszakup', title:'Разработка информационной системы управления документами', customer:'Министерство цифрового развития РК', budget:45000000, currency:'KZT', deadline:'2026-06-15', recommendation:'YES', score:87, summary:'Тендер полностью соответствует профилю IT компании. Высокий бюджет и чёткое техническое задание.', reasons:['Прямое соответствие специализации','Хороший бюджет 45 млн ₸','Государственный заказчик — стабильная оплата'], risks:['Конкуренция с крупными IT интеграторами'], url:'#' },
+  { id:2, source:'samruk', title:'Поставка компьютерного оборудования и лицензионного ПО', customer:'АО Самрук-Казына', budget:120000000, currency:'KZT', deadline:'2026-06-01', recommendation:'MAYBE', score:62, summary:'Подходит частично. Поставка оборудования может потребовать партнёрства с дистрибьютором.', reasons:['Высокий бюджет','Включает программное обеспечение'], risks:['Нужен склад и логистика для оборудования','Требуется авторизация вендора'], url:'#' },
+  { id:3, source:'goszakup', title:'Строительство административного здания в г. Астана', customer:'Акимат г. Астана', budget:850000000, currency:'KZT', deadline:'2026-05-30', recommendation:'NO', score:12, summary:'Строительный тендер не соответствует профилю IT компании.', reasons:[], risks:['Не профильный вид деятельности','Требуется строительная лицензия'], url:'#' },
+  { id:4, source:'goszakup', title:'Разработка мобильного приложения для граждан', customer:'Министерство труда и социальной защиты', budget:28000000, currency:'KZT', deadline:'2026-06-20', recommendation:'YES', score:91, summary:'Отличный тендер для IT компании. Разработка мобильного приложения — прямой профиль.', reasons:['Точное соответствие специализации','Разработка под iOS и Android','Госзаказчик'], risks:['Строгие требования к безопасности данных'], url:'#' },
+  { id:5, source:'samruk', title:'Ремонт кровли производственного здания', customer:'АО КазМунайГаз', budget:35000000, currency:'KZT', deadline:'2026-05-25', recommendation:'NO', score:5, summary:'Строительные работы не соответствуют профилю компании.', reasons:[], risks:['Не профильный вид деятельности'], url:'#' }
+];
+
+function loadDemoData() {
+  document.getElementById('stat-total').textContent = 5;
+  document.getElementById('stat-yes').textContent = 2;
+  document.getElementById('stat-maybe').textContent = 1;
+  document.getElementById('stat-no').textContent = 2;
+  document.getElementById('cnt-all').textContent = 5;
+  document.getElementById('cnt-yes').textContent = 2;
+  document.getElementById('cnt-maybe').textContent = 1;
+  document.getElementById('cnt-no').textContent = 2;
+
+  const wrap = document.getElementById('clientBtns');
+  wrap.innerHTML = '';
+  ['ДатаСофт Казахстан', 'ТехноСтрой KZ'].forEach((name, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'client-btn' + (i === 0 ? ' active' : '');
+    btn.textContent = name;
+    btn.onclick = () => { document.querySelectorAll('.client-btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); };
+    wrap.appendChild(btn);
+  });
+
+  renderTenders(demoTenders);
+}
+
+checkAuth();
+</script>
+</body>
+</html>
