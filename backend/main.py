@@ -662,27 +662,33 @@ def analyze_specification(text: str) -> dict:
 
 
 def run_analysis_for_all_clients():
-    """Запускает анализ всех непроверенных тендеров для всех клиентов"""
+    """Запускает анализ непроверенных тендеров только для Algimed и Resol"""
+    import time
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
 
-    clients = c.execute("SELECT * FROM clients").fetchall()
+    # Only analyze for real clients (Algimed, Resol), not demo ones
+    clients = c.execute("SELECT * FROM clients WHERE name IN ('Algimed','Resol')").fetchall()
     tenders = c.execute("""
-        SELECT * FROM tenders
-        WHERE id NOT IN (
+        SELECT t.* FROM tenders t
+        WHERE t.id NOT IN (
             SELECT DISTINCT tender_id FROM analyses
+            WHERE client_id IN (SELECT id FROM clients WHERE name IN ('Algimed','Resol'))
         )
-        ORDER BY fetched_at DESC
-        LIMIT 20
+        ORDER BY t.fetched_at DESC
+        LIMIT 15
     """).fetchall()
 
     print(f"\n🤖 Анализирую {len(tenders)} тендеров для {len(clients)} клиентов...")
 
-    for tender in tenders:
+    for i, tender in enumerate(tenders):
         for client in clients:
             print(f"  → {tender['title'][:50]}... для {client['name']}")
             result = analyze_tender_for_client(dict(tender), dict(client))
+            # Rate limit: pause every 6 requests (Groq free tier ~30 req/min)
+            if (i + 1) % 6 == 0:
+                time.sleep(12)
 
             c.execute("""
                 INSERT INTO analyses
@@ -1123,28 +1129,30 @@ class TenderAPIHandler(BaseHTTPRequestHandler):
                 if not user or not user["is_admin"]:
                     self._json({"error": "Только для администратора"}, 403)
                     return
-                # Collect keywords from all clients
+                # Only use keywords from Algimed and Resol (real clients, not demo)
                 conn = sqlite3.connect(DB_PATH)
                 conn.row_factory = sqlite3.Row
-                clients_rows = conn.execute("SELECT keywords FROM clients").fetchall()
+                clients_rows = conn.execute(
+                    "SELECT id, name, keywords FROM clients WHERE name IN ('Algimed','Resol')"
+                ).fetchall()
                 conn.close()
 
                 all_keywords: list = []
                 for row in clients_rows:
                     kws = [k.strip() for k in (row["keywords"] or "").split(",") if k.strip()]
                     all_keywords.extend(kws)
-                # Deduplicate, keep first 30
+                # Deduplicate, keep first 20 per client = 40 total max
                 seen_kw: set = set()
                 unique_kws: list = []
                 for kw in all_keywords:
                     if kw not in seen_kw:
                         seen_kw.add(kw)
                         unique_kws.append(kw)
-                        if len(unique_kws) >= 30:
+                        if len(unique_kws) >= 40:
                             break
 
-                print(f"🔎 fetch-web: {len(unique_kws)} ключевых слов")
-                found = fetch_goszakup_web(unique_kws, limit=60)
+                print(f"🔎 fetch-web: {len(unique_kws)} ключевых слов для Algimed+Resol")
+                found = fetch_goszakup_web(unique_kws, limit=40)
                 saved = save_web_tenders(found)
                 if found:
                     run_analysis_for_all_clients()
@@ -1162,6 +1170,25 @@ class TenderAPIHandler(BaseHTTPRequestHandler):
                     return
                 run_analysis_for_all_clients()
                 self._json({"status": "ok"})
+
+            elif parsed.path == "/api/reset-web":
+                # Delete all web-scraped tenders and their analyses to start fresh
+                user = self._auth()
+                if not user or not user["is_admin"]:
+                    self._json({"error": "Только для администратора"}, 403)
+                    return
+                conn = sqlite3.connect(DB_PATH)
+                web_ids = [r[0] for r in conn.execute(
+                    "SELECT id FROM tenders WHERE external_id LIKE 'goszakup_web_%'"
+                ).fetchall()]
+                if web_ids:
+                    placeholders = ",".join("?" * len(web_ids))
+                    conn.execute(f"DELETE FROM analyses WHERE tender_id IN ({placeholders})", web_ids)
+                    conn.execute(f"DELETE FROM tenders WHERE id IN ({placeholders})", web_ids)
+                conn.commit()
+                conn.close()
+                print(f"🧹 Удалено {len(web_ids)} веб-тендеров")
+                self._json({"deleted": len(web_ids)})
 
             else:
                 self._json({"error": "not found"}, 404)
