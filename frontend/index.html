@@ -652,7 +652,8 @@
     <span id="headerUser" style="font-size:13px;color:var(--muted)"></span>
     <button class="btn btn-secondary btn-sm" id="btnAddClient" style="display:none" onclick="openAddClient()">+ Клиент</button>
     <button class="btn btn-secondary btn-sm" onclick="openSpecModal()">📄 Анализ ТЗ</button>
-    <button class="btn btn-primary btn-sm" id="btnRefresh" style="display:none" onclick="runFetchAndAnalyze()">🔄 Обновить тендеры</button>
+    <button class="btn btn-primary btn-sm" id="btnFetchWeb" style="display:none" onclick="runFetchWeb()">🌐 Найти тендеры</button>
+    <button class="btn btn-primary btn-sm" id="btnRefresh" style="display:none" onclick="runFetchAndAnalyze()">🔄 Обновить (API)</button>
     <button class="btn btn-secondary btn-sm" onclick="doLogout()">Выйти</button>
   </div>
 </header>
@@ -868,6 +869,7 @@ function applyUserRole() {
   document.getElementById('headerUser').textContent = `👤 ${currentUser.username}`;
   if (currentUser.is_admin) {
     document.getElementById('btnAddClient').style.display = '';
+    document.getElementById('btnFetchWeb').style.display = '';
     document.getElementById('btnRefresh').style.display = '';
   }
 }
@@ -1084,6 +1086,22 @@ function setSrcFilter(btn, src) {
   document.querySelectorAll('[data-src]').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   loadTenders();
+}
+
+// ---- WEB SCRAPE & ANALYZE ----
+async function runFetchWeb() {
+  showLoading('Ищу тендеры на goszakup.gov.kz...');
+  try {
+    const res = await fetch(`${API}/api/fetch-web`, { method: 'POST', headers: authHeaders() });
+    const data = await res.json();
+    document.getElementById('loadingText').textContent = 'AI анализирует найденные тендеры...';
+    await loadStats();
+    await loadTenders();
+    showToast(`✅ Найдено ${data.found || 0}, сохранено ${data.saved || 0} новых тендеров`);
+  } catch(e) {
+    showToast('⚠️ Ошибка поиска. Проверь соединение.');
+  }
+  hideLoading();
 }
 
 // ---- FETCH & ANALYZE ----

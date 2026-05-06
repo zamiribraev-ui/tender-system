@@ -346,6 +346,156 @@ def save_samruk_tenders(tenders):
 
 
 # ============================================================
+# ВЕБРОЙ СКРАПЕР GOSZAKUP (без API токена)
+# ============================================================
+
+def fetch_goszakup_web(keywords: list, limit: int = 60) -> list:
+    """
+    Scrapes goszakup.gov.kz public search page without API token.
+    Searches by keywords, returns list of tender dicts.
+    """
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        print("❌ beautifulsoup4 не установлен: pip install beautifulsoup4")
+        return []
+
+    results = []
+    seen_ids: set = set()
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Referer": "https://goszakup.gov.kz/",
+    }
+
+    for keyword in keywords:
+        if len(results) >= limit:
+            break
+        try:
+            print(f"  🔍 Поиск: '{keyword}'")
+            resp = requests.get(
+                "https://goszakup.gov.kz/ru/search/lots",
+                params={"filter[name]": keyword, "count": "20"},
+                headers=headers,
+                timeout=30,
+            )
+            if resp.status_code != 200:
+                print(f"    HTTP {resp.status_code}")
+                continue
+
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(resp.text, "html.parser")
+
+            for a_tag in soup.find_all("a", href=True):
+                href = a_tag["href"]
+                is_announce = "/announce/index/" in href
+                is_lot = "/lots/index/" in href
+                if not (is_announce or is_lot):
+                    continue
+
+                pattern = "/announce/index/" if is_announce else "/lots/index/"
+                raw_id = href.split(pattern)[-1].split("/")[0].split("?")[0]
+                if not raw_id.isdigit():
+                    continue
+
+                uid = ("lot_" if is_lot else "") + raw_id
+                if uid in seen_ids:
+                    continue
+                seen_ids.add(uid)
+
+                row = a_tag.find_parent("tr")
+                cells = row.find_all("td") if row else []
+
+                title = a_tag.get_text(strip=True)
+                # Strip leading lot-number prefix like "16957082-1 " or "12345678 "
+                import re as _re
+                title = _re.sub(r"^\d{5,}-\S*\s*", "", title).strip()
+                if not title or len(title) < 5:
+                    title = cells[1].get_text(strip=True) if len(cells) > 1 else f"Тендер {raw_id}"
+                    title = _re.sub(r"^\d{5,}-\S*\s*", "", title).strip()
+
+                customer = cells[2].get_text(strip=True) if len(cells) > 2 else ""
+
+                budget = 0.0
+                for idx in [3, 4, 5]:
+                    if len(cells) > idx:
+                        raw = cells[idx].get_text(strip=True)
+                        cleaned = "".join(c for c in raw if c.isdigit() or c == ".")
+                        if cleaned:
+                            try:
+                                budget = float(cleaned)
+                                break
+                            except ValueError:
+                                pass
+
+                deadline = ""
+                for idx in [4, 5, 6]:
+                    if len(cells) > idx:
+                        txt = cells[idx].get_text(strip=True)
+                        if len(txt) >= 8 and any(c.isdigit() for c in txt):
+                            deadline = txt
+                            break
+
+                full_url = ("https://goszakup.gov.kz" + href) if href.startswith("/") else href
+                results.append({
+                    "id": raw_id,
+                    "title": title,
+                    "customer": customer,
+                    "budget": budget,
+                    "deadline": deadline,
+                    "url": full_url,
+                    "keyword": keyword,
+                })
+                if len(results) >= limit:
+                    break
+
+        except Exception as exc:
+            print(f"  ❌ Ошибка скрапинга '{keyword}': {exc}")
+
+    print(f"✅ Веб-скрапинг завершён: {len(results)} тендеров")
+    return results
+
+
+def save_web_tenders(tenders: list) -> int:
+    """Сохраняет тендеры из веб-скрапинга в базу данных"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    saved = 0
+
+    for t in tenders:
+        external_id = f"goszakup_web_{t['id']}"
+        try:
+            c.execute("""
+                INSERT OR IGNORE INTO tenders
+                (external_id, source, title, description, budget, currency, deadline, customer, url, raw_data)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                external_id, "goszakup",
+                t["title"],
+                f"Найдено по запросу: {t.get('keyword', '')}",
+                t["budget"], "KZT",
+                t["deadline"],
+                t["customer"],
+                t["url"],
+                json.dumps(t, ensure_ascii=False),
+            ))
+            if c.rowcount:
+                saved += 1
+        except Exception as exc:
+            print(f"  Ошибка сохранения веб-тендера {t['id']}: {exc}")
+
+    conn.commit()
+    conn.close()
+    print(f"✅ Сохранено новых веб-тендеров: {saved}")
+    return saved
+
+
+# ============================================================
 # AI АНАЛИЗ (Claude)
 # ============================================================
 
@@ -574,6 +724,72 @@ def add_sample_clients():
     conn.commit()
     conn.close()
     print("✅ Добавлены тестовые клиенты")
+
+
+# ============================================================
+# РЕАЛЬНЫЕ КЛИЕНТЫ — Algimed и Resol
+# ============================================================
+
+ALGIMED_KEYWORDS = [
+    "лабораторное оборудование", "реагенты лабораторные", "центрифуга",
+    "ПЦР оборудование", "спектрофотометр", "микроскоп", "инкубатор",
+    "ламинарный бокс", "автоклав", "хроматограф", "Thermo Fisher",
+    "Eppendorf", "ELISA ИФА", "биохимический анализатор", "расходные лаборатори",
+]
+
+RESOL_KEYWORDS = [
+    "катализатор НПЗ", "теплообменник", "деэмульгатор", "ингибитор коррозии",
+    "промышленные реагенты", "нефтехимия химикаты", "абсорбент нефтепереработка",
+    "реакторное оборудование", "химикаты НПЗ", "нефтепереработка реагент",
+]
+
+def add_real_clients():
+    """Добавляет Algimed и Resol если ещё нет"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    clients_to_add = [
+        {
+            "name": "Algimed",
+            "description": "Поставщик лабораторного и медицинского оборудования, реагентов и расходных материалов",
+            "industry": "Лабораторное оборудование / Медицина",
+            "keywords": ", ".join(ALGIMED_KEYWORDS),
+            "capabilities": (
+                "Поставка центрифуг, ПЦР-оборудования, спектрофотометров, пипеток, инкубаторов, "
+                "автоклавов, микроскопов, хроматографов, биохимических анализаторов, ИФА/ELISA, "
+                "ламинарных боксов, культуральных сред, лабораторных реагентов. "
+                "Официальный дистрибьютор Thermo Fisher Scientific, Eppendorf."
+            ),
+        },
+        {
+            "name": "Resol",
+            "description": "Поставка промышленной химии и оборудования для нефтепереработки",
+            "industry": "Промышленная химия / Нефтехимия",
+            "keywords": ", ".join(RESOL_KEYWORDS),
+            "capabilities": (
+                "Поставка катализаторов для НПЗ, теплообменников, промышленных реагентов, "
+                "деэмульгаторов, ингибиторов коррозии, абсорбентов, реакторного оборудования, "
+                "химикатов для нефтепереработки."
+            ),
+        },
+    ]
+
+    for cl in clients_to_add:
+        exists = c.execute("SELECT id FROM clients WHERE name=?", [cl["name"]]).fetchone()
+        if not exists:
+            c.execute("""
+                INSERT INTO clients (name, description, industry, keywords, capabilities)
+                VALUES (?, ?, ?, ?, ?)
+            """, (cl["name"], cl["description"], cl["industry"], cl["keywords"], cl["capabilities"]))
+            print(f"✅ Добавлен клиент: {cl['name']}")
+        else:
+            c.execute("""
+                UPDATE clients SET description=?, industry=?, keywords=?, capabilities=?
+                WHERE name=?
+            """, (cl["description"], cl["industry"], cl["keywords"], cl["capabilities"], cl["name"]))
+
+    conn.commit()
+    conn.close()
 
 
 # ============================================================
@@ -882,6 +1098,36 @@ class TenderAPIHandler(BaseHTTPRequestHandler):
                 save_samruk_tenders(sk)
                 self._json({"goszakup": len(gz), "samruk": len(sk)})
 
+            elif parsed.path == "/api/fetch-web":
+                user = self._auth()
+                if not user or not user["is_admin"]:
+                    self._json({"error": "Только для администратора"}, 403)
+                    return
+                # Collect keywords from all clients
+                conn = sqlite3.connect(DB_PATH)
+                conn.row_factory = sqlite3.Row
+                clients_rows = conn.execute("SELECT keywords FROM clients").fetchall()
+                conn.close()
+
+                all_keywords: list = []
+                for row in clients_rows:
+                    kws = [k.strip() for k in (row["keywords"] or "").split(",") if k.strip()]
+                    all_keywords.extend(kws)
+                # Deduplicate, keep first 30
+                seen_kw: set = set()
+                unique_kws: list = []
+                for kw in all_keywords:
+                    if kw not in seen_kw:
+                        seen_kw.add(kw)
+                        unique_kws.append(kw)
+                        if len(unique_kws) >= 30:
+                            break
+
+                found = fetch_goszakup_web(unique_kws, limit=60)
+                saved = save_web_tenders(found)
+                run_analysis_for_all_clients()
+                self._json({"found": len(found), "saved": saved})
+
             elif parsed.path == "/api/analyze":
                 user = self._auth()
                 if not user or not user["is_admin"]:
@@ -915,6 +1161,7 @@ if __name__ == "__main__":
     print("🚀 Запуск Tender Analysis System...")
     init_db()
     add_sample_clients()
+    add_real_clients()
     add_demo_tenders()
     ensure_admin()
     run_analysis_for_all_clients()
